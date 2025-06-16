@@ -88,7 +88,7 @@ export default function IGTable() {
 
   useEffect(() => {
     const loadData = async () => {
-      const yamlText = await fetch("/igs.yaml").then((res) => res.text());
+      const yamlText = await fetch("./public/igs.yaml").then((res) => res.text());
       const config = parse(yamlText);
 
       const now = new Date();
