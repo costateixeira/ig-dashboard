@@ -1,46 +1,65 @@
-name: Deploy Dashboard to GitHub Pages
+name: Deploy IG Dashboard
 
 on:
   push:
     branches:
-      - main  # or 'master' — adjust as needed
-  workflow_dispatch:   # allows manual or API trigger
+      - main  # 👈 Or your default branch
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
-
 
     steps:
-      # Checkout your repo
-      - name: 📥 Checkout
+      # 1️⃣ Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # Setup Node.js (use your project's version)
-      - name: 🟢 Setup Node.js
+      # 2️⃣ Setup Node (adjust version if needed)
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: 'npm'
+          node-version: "20"
 
-      # Install dependencies
-      - name: 📦 Install dependencies
+      # 3️⃣ Install dependencies (fails if lock file out-of-sync)
+      - name: Install dependencies
         run: npm ci
 
-      # 👇 This step runs a node script to build the data
-      - run: node build-igs-data.js
+      # 4️⃣ Generate igs-data.json (runs your script)
+      - name: Build IGs data
+        run: node build-igs-data.js
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      # Build Vite site
-      - name: 🏗️ Build
+      # 5️⃣ Build static site
+      - name: Build Vite site
         run: npm run build
 
-      # Deploy to GitHub Pages
-      - name: 🚀 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      # 6️⃣ Upload static site to GitHub Pages artifact
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dist
+          path: ./dist  # <-- Vite output
+
+  # 7️⃣ Deploy to GitHub Pages
+  deploy:
+    needs: build-and-deploy
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
