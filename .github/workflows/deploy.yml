@@ -12,7 +12,7 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
-      
+
     steps:
       # Checkout your repo
       - name: 📥 Checkout
@@ -31,6 +31,8 @@ jobs:
 
       # 👇 This step runs a node script to build the data
       - run: node build-igs-data.js
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
 
       # Build Vite site
       - name: 🏗️ Build
