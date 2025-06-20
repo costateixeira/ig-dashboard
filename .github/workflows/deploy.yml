@@ -1,0 +1,44 @@
+name: Deploy Dashboard to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main  # or 'master' — adjust as needed
+  workflow_dispatch:   # allows manual or API trigger
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      
+    steps:
+      # Checkout your repo
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      # Setup Node.js (use your project's version)
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      # Install dependencies
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      # 👇 This step runs a node script to build the data
+      - run: node build-igs-data.js
+
+      # Build Vite site
+      - name: 🏗️ Build
+        run: npm run build
+
+      # Deploy to GitHub Pages
+      - name: 🚀 Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist

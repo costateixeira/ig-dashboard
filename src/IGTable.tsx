@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 import React, { useEffect, useState } from "react";
-import { parse } from "yaml"; // ✅ Use `yaml` package
+import { parse } from "yaml";
 import "./styles.css";
 
 const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_TOKEN;
@@ -34,7 +34,7 @@ interface IG {
   branches: Branch[];
   versions: Version[];
   publishedVersions: PublishedVersion[];
-  ciBuildUrl: string; // ✅ Add this!
+  ciBuildUrl: string;
 }
 
 interface Config {
@@ -52,7 +52,6 @@ const headers = {
 
 function getProxiedUrl(published: string): string {
   const parsed = new URL(published);
-
   if (parsed.hostname.includes("smart.who.int")) {
     return `/proxy/smart${parsed.pathname}/package-list.json`;
   }
@@ -62,9 +61,8 @@ function getProxiedUrl(published: string): string {
   if (parsed.hostname.includes("github.io")) {
     return `/proxy/githubio${parsed.pathname}/package-list.json`;
   }
-
   console.warn(`⚠️ No proxy for host: ${parsed.hostname}`);
-  return published; // fallback
+  return published;
 }
 
 export default function IGTable() {
@@ -73,14 +71,10 @@ export default function IGTable() {
   const [showUnpublishedTags, setShowUnpublishedTags] = useState(true);
 
   const getVisibleBranches = (ig: IG) =>
-    showOldBranches
-      ? ig.branches
-      : ig.branches.filter((b) => b.isDefault || !b.isStale);
+    showOldBranches ? ig.branches : ig.branches.filter((b) => b.isDefault || !b.isStale);
 
   const getVisibleVersions = (ig: IG) =>
-    showUnpublishedTags
-      ? ig.versions
-      : ig.versions.filter((v) => v.publishedUrl);
+    showUnpublishedTags ? ig.versions : ig.versions.filter((v) => v.publishedUrl);
 
   const triggerBuild = (ig: IG, branch: string) => {
     alert(`Trigger build for ${ig.name} on ${branch}`);
@@ -88,8 +82,27 @@ export default function IGTable() {
 
   useEffect(() => {
     const loadData = async () => {
+      // ✅ FIRST TRY LOCAL igs-data.json
+      try {
+        const res = await fetch("./igs-data.json");
+        if (res.ok) {
+          const json = await res.json();
+          setIgs(json);
+          console.log("✅ Loaded prebuilt igs-data.json");
+          return;
+        }
+      } catch {
+        console.log("⚠️ No prebuilt igs-data.json found, using live mode");
+      }
+
+      // ✅ OTHERWISE USE LIVE GRAPHQL
+      if (!GITHUB_TOKEN) {
+        console.error("❌ No GitHub token, cannot load live data");
+        return;
+      }
+
       const yamlText = await fetch("./igs.yaml").then((res) => res.text());
-      const config = parse(yamlText);
+      const config: Config = parse(yamlText);
 
       const now = new Date();
       const MAX_DAYS = 90;
@@ -101,6 +114,7 @@ export default function IGTable() {
 
             const query = `{
               repository(owner: "${owner}", name: "${repoName}") {
+                url
                 defaultBranchRef {
                   name
                   target { ... on Commit { committedDate } }
@@ -114,7 +128,6 @@ export default function IGTable() {
                 tags: refs(refPrefix: "refs/tags/", first: 100) {
                   nodes { name }
                 }
-                url
               }
             }`;
 
@@ -129,12 +142,11 @@ export default function IGTable() {
             if (!repo) throw new Error(`Repo not found for ${ig.repo}`);
 
             const defaultBranchName = repo.defaultBranchRef?.name || "";
-            const defaultCommitDate = repo.defaultBranchRef?.target
-              ?.committedDate
+            const defaultCommitDate = repo.defaultBranchRef?.target?.committedDate
               ? new Date(repo.defaultBranchRef.target.committedDate)
               : null;
 
-            const branches = (repo.branches?.nodes || [])
+            const branches: Branch[] = (repo.branches?.nodes || [])
               .filter((node: any) => node.name !== "gh-pages")
               .map((node: any) => {
                 const commitDate = new Date(node.target.committedDate);
@@ -145,19 +157,14 @@ export default function IGTable() {
                   name: node.name,
                   daysSince,
                   isDefault: node.name === defaultBranchName,
-                  isStale:
-                    daysSince > MAX_DAYS && node.name !== defaultBranchName,
+                  isStale: daysSince > MAX_DAYS && node.name !== defaultBranchName,
                 };
               });
 
-            // 1️⃣ Raw tags (excluding current)
             const tagVersions = (repo.tags?.nodes || [])
               .map((n: any) => n.name.replace(/^v/, ""))
-              .filter(
-                (v) => !["current", "vcurrent"].includes(v.toLowerCase())
-              );
+              .filter((v) => !["current", "vcurrent"].includes(v.toLowerCase()));
 
-            // 2️⃣ Published versions (from package-list, also filtered)
             let publishedEntries: PublishedVersion[] = [];
             if (ig.published) {
               try {
@@ -166,12 +173,9 @@ export default function IGTable() {
                 if (res2.ok) {
                   const json = await res2.json();
                   publishedEntries = json.list
-                    .filter(
-                      (e: any) =>
-                        e.version &&
-                        !["current", "vcurrent"].includes(
-                          e.version.toLowerCase()
-                        )
+                    .filter((e: any) =>
+                      e.version &&
+                      !["current", "vcurrent"].includes(e.version.toLowerCase())
                     )
                     .map((e: any) => ({
                       version: e.version.replace(/^v/, ""),
@@ -183,24 +187,16 @@ export default function IGTable() {
               }
             }
 
-            // 3️⃣ Merge, de-dupe
             const publishedVersions = publishedEntries.map((e) => e.version);
-            const allVersions = Array.from(
-              new Set([...tagVersions, ...publishedVersions])
-            );
+            const allVersions = Array.from(new Set([...tagVersions, ...publishedVersions]));
 
-            // 4️⃣ Build detailed list: for each version, track if it's a raw tag + if it's published
             const versions: Version[] = allVersions.map((version) => {
               const hasTag = tagVersions.includes(version);
-              const publishedEntry = publishedEntries.find(
-                (e) => e.version === version
-              );
+              const publishedEntry = publishedEntries.find((e) => e.version === version);
               return {
                 version,
                 hasTag,
-                publishedUrl: publishedEntry
-                  ? publishedEntry.publishedUrl
-                  : null,
+                publishedUrl: publishedEntry ? publishedEntry.publishedUrl : null,
               };
             });
 
@@ -214,7 +210,7 @@ export default function IGTable() {
               branches,
               versions,
               publishedVersions: publishedEntries,
-              ciBuildUrl, // ✅
+              ciBuildUrl,
             };
           } catch (e) {
             console.error(`❌ Failed to load IG [${ig.name}]:`, e);
@@ -226,6 +222,7 @@ export default function IGTable() {
               branches: [],
               versions: [],
               publishedVersions: [],
+              ciBuildUrl: "",
             } as IG;
           }
         })
@@ -239,27 +236,17 @@ export default function IGTable() {
 
   return (
     <div className="container">
-      <h1>📄 IG Publication Dashboard</h1>
-
+      <h1>📄 IG Dashboard</h1>
       <div className="filters">
         <label>
-          <input
-            type="checkbox"
-            checked={showOldBranches}
-            onChange={(e) => setShowOldBranches(e.target.checked)}
-          />
+          <input type="checkbox" checked={showOldBranches} onChange={e => setShowOldBranches(e.target.checked)} />
           Show old branches
         </label>
         <label>
-          <input
-            type="checkbox"
-            checked={showUnpublishedTags}
-            onChange={(e) => setShowUnpublishedTags(e.target.checked)}
-          />
+          <input type="checkbox" checked={showUnpublishedTags} onChange={e => setShowUnpublishedTags(e.target.checked)} />
           Show unpublished tags
         </label>
       </div>
-
       <table className="dashboard-table">
         <thead>
           <tr>
@@ -274,27 +261,14 @@ export default function IGTable() {
           </tr>
         </thead>
         <tbody>
-          {igs.map((ig) => (
+          {igs.map(ig => (
             <tr key={ig.repo}>
               <td>{ig.name}</td>
-              <td>
-                <a href={ig.html_url} target="_blank" rel="noreferrer">
-                  {ig.repo}
-                </a>
-              </td>
+              <td><a href={ig.html_url} target="_blank" rel="noreferrer">{ig.repo}</a></td>
               <td>
                 <ul className="branch-list compact">
-                  {getVisibleBranches(ig).map((branch) => (
-                    <li
-                      key={branch.name}
-                      className={
-                        branch.isDefault && branch.daysSince > 90
-                          ? "staleDefault"
-                          : ""
-                      }
-                    >
-                      {branch.name} <small>({branch.daysSince} d)</small>
-                    </li>
+                  {getVisibleBranches(ig).map(b => (
+                    <li key={b.name}>{b.name} <small>({b.daysSince} d)</small></li>
                   ))}
                 </ul>
               </td>
@@ -302,42 +276,20 @@ export default function IGTable() {
               <td>{ig.last_commit}</td>
               <td>
                 <ul className="tags-list compact">
-                  {getVisibleVersions(ig).map((v) => (
+                  {getVisibleVersions(ig).map(v => (
                     <li key={v.version}>
-                      <span className={v.hasTag ? "green-ok" : ""}>
-                        v{v.version}
-                      </span>
-                      {!v.publishedUrl && (
-                        <span className="warning-icon">⚠️</span>
-                      )}
+                      <span className={v.hasTag ? "green-ok" : ""}>v{v.version}</span>
+                      {!v.publishedUrl && <span className="warning-icon">⚠️</span>}
                     </li>
                   ))}
                 </ul>
               </td>
               <td>
-                <div>
-                  <a
-                    href={ig.ciBuildUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ci-build-link"
-                  >
-                    CI Build
-                  </a>
-                </div>
-
                 {ig.publishedVersions.length ? (
                   <ul className="tags-list compact">
-                    {ig.publishedVersions.map((v) => (
+                    {ig.publishedVersions.map(v => (
                       <li key={v.version}>
-                        <a
-                          href={v.publishedUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="green-ok"
-                        >
-                          v{v.version}
-                        </a>
+                        <a href={v.publishedUrl} target="_blank" rel="noreferrer" className="green-ok">v{v.version}</a>
                       </li>
                     ))}
                   </ul>
@@ -345,7 +297,6 @@ export default function IGTable() {
                   <span>No releases</span>
                 )}
               </td>
-
               <td className="build-dropdown">
                 <div className="dropdown">
                   <button className="action-btn">Trigger Build ⏷</button>
